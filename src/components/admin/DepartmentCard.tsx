@@ -1,6 +1,6 @@
 import React from 'react'
 import { Department } from '../../types'
-import { Edit3 as Edit, Trash2, Users, Shield, Activity } from 'lucide-react'
+import { Edit3 as Edit, Trash2, Users, Shield, MapPin } from 'lucide-react'
 
 interface DepartmentCardProps {
   department: Department
@@ -56,11 +56,11 @@ const DepartmentCard: React.FC<DepartmentCardProps> = ({ department, onEdit, onD
               </div>
             </div>
             <div className="flex flex-col">
-              <span className="text-[10px] font-black text-gray-400 uppercase">Comms</span>
+              <span className="text-[10px] font-black text-gray-400 uppercase">Sector / Zone</span>
               <div className="flex items-center space-x-1 mt-0.5">
-                <Activity size={12} className="text-emerald-500" />
+                <MapPin size={12} className="text-emerald-500" />
                 <span className="text-xs font-bold text-gray-500 dark:text-gray-400 truncate">
-                  {department.telegramChatId || "N/A"}
+                  {department.zone || "Generic"}
                 </span>
               </div>
             </div>

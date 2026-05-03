@@ -13,6 +13,7 @@ import { MaterialRequestManager } from './admin/MaterialRequestManager'
 import { OperationsDashboard } from './admin/OperationsDashboard'
 import { PerformanceEngine } from './admin/PerformanceEngine'
 import { EmployeeHistory } from './admin/EmployeeHistory'
+import { OperationsMap } from './admin/OperationsMap'
 
 interface AdminPanelProps {
   userData: any;
@@ -22,7 +23,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ userData }) => {
   const { db } = useFirebase()
   const { showNotification } = useNotification()
 
-  const [activeTab, setActiveTab] = useState<'ops' | 'performance' | 'hr' | 'employees' | 'companies' | 'tasks' | 'roles' | 'finance' | 'crm' | 'inventory' | 'materials'>('ops')
+  const [activeTab, setActiveTab] = useState<'ops' | 'map' | 'performance' | 'hr' | 'employees' | 'companies' | 'tasks' | 'roles' | 'finance' | 'crm' | 'inventory' | 'materials'>('ops')
   const [hrSubTab, setHrSubTab] = useState<'attendance' | 'leaves' | 'stats'>('attendance')
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([])
   const [leaveRequests, setLeaveRequests] = useState<any[]>([])
@@ -130,10 +131,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ userData }) => {
       </div>
 
 
-      {loading && activeTab !== 'ops' && activeTab !== 'performance' && activeTab !== 'employees' ? (
+      {loading && activeTab !== 'ops' && activeTab !== 'performance' && activeTab !== 'employees' && activeTab !== 'map' ? (
         <div className="text-center p-8 text-gray-500">Loading data...</div>
       ) : activeTab === 'ops' ? (
         <OperationsDashboard userData={userData} />
+      ) : activeTab === 'map' ? (
+        <OperationsMap userData={userData} />
       ) : activeTab === 'performance' ? (
         <PerformanceEngine userData={userData} />
       ) : activeTab === 'employees' ? (

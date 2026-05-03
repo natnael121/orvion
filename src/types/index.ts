@@ -113,6 +113,7 @@ export interface Department {
   order: number
   icon: string
   isActive: boolean
+  zone?: string
   notificationTypes?: string[]
   createdAt: Date
   updatedAt: Date

@@ -36,6 +36,7 @@ const DepartmentEditModal: React.FC<DepartmentEditModalProps> = ({
     order: department?.order || 0,
     icon: department?.icon || '👷',
     isActive: department?.isActive ?? true,
+    zone: department?.zone || '',
     notificationTypes: department?.notificationTypes || [],
     userId: userId,
     shopId: shopId
@@ -162,6 +163,17 @@ const DepartmentEditModal: React.FC<DepartmentEditModalProps> = ({
                   <option key={emp.id} value={emp.id}>{emp.displayName || emp.name}</option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Operational Zone / Region</label>
+              <input
+                type="text"
+                value={formData.zone}
+                onChange={(e) => setFormData({ ...formData, zone: e.target.value })}
+                className="w-full p-4 bg-gray-50 dark:bg-gray-900 border-0 rounded-2xl font-bold"
+                placeholder="e.g. Zone A, North Sector"
+              />
             </div>
           </div>
 
