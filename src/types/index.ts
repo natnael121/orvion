@@ -18,7 +18,6 @@ export interface UserData {
   telegramId?: number
   telegram_id?: number // Add for compatibility with different field names
   telegramBotToken?: string
-  telegramBotToken?: string
   profileCompleted?: boolean
   settings: {
     notifications: {
@@ -103,9 +102,13 @@ export interface Department {
   userId: string
   shopId?: string
   name: string
+  description?: string
+  supervisorId?: string
+  supervisorName?: string
+  type: 'fiber' | 'civil' | 'fixer' | 'survey' | 'warehouse' | 'admin'
   telegramChatId: string
   adminChatId?: string
-  role: 'admin' | 'shop' | 'delivery'
+  role: 'admin' | 'shop' | 'delivery' | 'field'
   order: number
   icon: string
   isActive: boolean
