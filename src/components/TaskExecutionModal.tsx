@@ -59,7 +59,7 @@ export const TaskExecutionModal: React.FC<TaskExecutionModalProps> = ({ task, on
                     progressLogs: arrayUnion(newLog)
                 })
 
-                showNotification('Log added!', 'success')
+                showNotification('success', 'Log added!')
                 setLogNote('')
                 setLogPhoto(null)
                 setIsIssue(false)
@@ -67,19 +67,19 @@ export const TaskExecutionModal: React.FC<TaskExecutionModalProps> = ({ task, on
                 onRefresh()
                 setView('details')
             }, (err) => {
-                showNotification('Location access required to log.', 'error')
+                showNotification('error', 'Location access required to log.')
                 setSubmitting(false)
             })
         } catch (e) {
             console.error(e)
-            showNotification('Failed to add log', 'error')
+            showNotification('error', 'Failed to add log')
             setSubmitting(false)
         }
     }
 
     const handleFinishTask = async () => {
         if (!completedQty) {
-            showNotification('Complete quantity required', 'error')
+            showNotification('error', 'Complete quantity required')
             return
         }
         setSubmitting(true)
@@ -100,17 +100,17 @@ export const TaskExecutionModal: React.FC<TaskExecutionModalProps> = ({ task, on
                         lng: pos.coords.longitude
                     }
                 })
-                showNotification('Task submitted for verification!', 'success')
+                showNotification('success', 'Task submitted for verification!')
                 setSubmitting(false)
                 onRefresh()
                 onClose()
             }, (err) => {
-                showNotification('Location required to finish task', 'error')
+                showNotification('error', 'Location required to finish task')
                 setSubmitting(false)
             })
         } catch (e) {
             console.error(e)
-            showNotification('Failed to finish task', 'error')
+            showNotification('error', 'Failed to finish task')
             setSubmitting(false)
         }
     }
@@ -129,13 +129,13 @@ export const TaskExecutionModal: React.FC<TaskExecutionModalProps> = ({ task, on
                 status: 'pending',
                 timestamp: new Date()
             })
-            showNotification('Material requested from store', 'success')
+            showNotification('success', 'Material requested from store')
             setMaterialName('')
             setMaterialQty('')
             setSubmitting(false)
         } catch (e) {
             console.error(e)
-            showNotification('Failed to request material', 'error')
+            showNotification('error', 'Failed to request material')
             setSubmitting(false)
         }
     }

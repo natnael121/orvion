@@ -3,7 +3,7 @@ import { collection, addDoc, query, where, getDocs, orderBy } from 'firebase/fir
 import { useFirebase } from '../contexts/FirebaseContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { UserData } from '../types';
-import { MapPin, Camera, Clock, CheckCircle, Video, Loader2 } from 'lucide-react';
+import { MapPin, Camera, Clock, CheckCircle, Video, Loader2, User as UserIcon, RefreshCw } from 'lucide-react';
 import { uploadImageToImgBB } from '../services/imgbbService';
 
 interface AttendanceManagerProps {
@@ -18,35 +18,57 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
     const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
     const [photo, setPhoto] = useState<string | null>(null);
     const [cameraActive, setCameraActive] = useState(false);
+    const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
 
-    const startCamera = async () => {
+    const startCamera = async (mode: 'user' | 'environment' = 'environment') => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+            if (streamRef.current) {
+                stopCamera();
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: mode,
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            });
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
+                // Important for mobile autoplay
+                videoRef.current.onloadedmetadata = () => {
+                    videoRef.current?.play().catch(e => console.error("Video play error:", e));
+                };
             }
             streamRef.current = stream;
             setCameraActive(true);
+            setFacingMode(mode);
         } catch (err) {
-            showNotification('Unable to access camera: ' + (err as Error).message, 'error');
+            console.error("Camera access error:", err);
+            showNotification('error', 'Unable to access camera: ' + (err as Error).message);
         }
     };
 
     const stopCamera = () => {
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
         }
         setCameraActive(false);
     };
 
+    const toggleCamera = () => {
+        const nextMode = facingMode === 'user' ? 'environment' : 'user';
+        startCamera(nextMode);
+    };
+
     const capturePhoto = () => {
-        if (videoRef.current) {
+        if (videoRef.current && videoRef.current.readyState >= 2) {
             const canvas = document.createElement('canvas');
-            canvas.width = videoRef.current.videoWidth;
-            canvas.height = videoRef.current.videoHeight;
+            canvas.width = videoRef.current.videoWidth || 640;
+            canvas.height = videoRef.current.videoHeight || 480;
             const ctx = canvas.getContext('2d');
             if (ctx) {
                 ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
@@ -54,13 +76,15 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
                 setPhoto(dataUrl);
                 stopCamera();
             }
+        } else {
+            showNotification('warning', 'Camera not ready yet');
         }
     };
 
     const getLocation = () => {
         setFetchingLocation(true);
         if (!navigator.geolocation) {
-            showNotification('Geolocation is not supported by your browser', 'error');
+            showNotification('error', 'Geolocation is not supported by your browser');
             setFetchingLocation(false);
             return;
         }
@@ -72,10 +96,11 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
                     lng: position.coords.longitude
                 });
                 setFetchingLocation(false);
-                showNotification('Location captured successfully', 'success');
+                showNotification('success', 'Location captured successfully');
             },
-            (error) => {
-                showNotification('Unable to retrieve your location', 'error');
+            (err) => {
+                console.error("GPS Error:", err);
+                showNotification('error', 'Unable to retrieve your location. Please check GPS settings.');
                 setFetchingLocation(false);
             }
         );
@@ -83,26 +108,26 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
 
     const handleCheckIn = async (type: 'check-in' | 'check-out') => {
         if (!userData?.uid) {
-            showNotification('User not authenticated', 'error');
+            showNotification('error', 'User not authenticated');
             return;
         }
         if (!photo) {
-            showNotification('Please capture a photo first', 'error');
+            showNotification('error', 'Please capture a photo first');
             return;
         }
         if (!location) {
-            showNotification('Please capture your location first', 'error');
+            showNotification('error', 'Please capture your location first');
             return;
         }
 
         setLoading(true);
         try {
-            showNotification('Uploading photo...', 'success');
+            showNotification('info', 'Uploading photo...');
             const photoUrl = await uploadImageToImgBB(photo);
 
             const attendanceData = {
                 userId: userData.uid,
-                userName: userData.name || userData.first_name || 'Employee',
+                userName: userData.displayName || 'Employee',
                 type,
                 timestamp: new Date(),
                 location,
@@ -111,13 +136,13 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
             };
 
             await addDoc(collection(db, 'attendance'), attendanceData);
-            showNotification(`Successfully ${type === 'check-in' ? 'checked in' : 'checked out'}`, 'success');
+            showNotification('success', `Successfully ${type === 'check-in' ? 'checked in' : 'checked out'}`);
 
             setPhoto(null);
             setLocation(null);
         } catch (err) {
             console.error(err);
-            showNotification('Failed to process attendance record', 'error');
+            showNotification('error', 'Failed to process attendance record');
         } finally {
             setLoading(false);
         }
@@ -151,22 +176,38 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
                             </div>
                         ) : cameraActive ? (
                             <div className="relative rounded-lg overflow-hidden h-48 w-full max-w-xs mx-auto bg-black">
-                                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                                <button
-                                    onClick={capturePhoto}
-                                    className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white text-blue-500 rounded-full px-4 py-2 font-bold shadow-lg flex items-center space-x-2"
-                                >
-                                    <Camera size={20} />
-                                    <span>Capture</span>
-                                </button>
+                                <video
+                                    ref={videoRef}
+                                    autoPlay
+                                    playsInline
+                                    muted
+                                    className="w-full h-full object-cover"
+                                />
+                                <div className="absolute bottom-4 left-0 right-0 flex justify-center space-x-4">
+                                    <button
+                                        onClick={capturePhoto}
+                                        className="bg-white text-blue-500 rounded-full px-4 py-2 font-bold shadow-lg flex items-center space-x-2 active:scale-95 transition-transform"
+                                    >
+                                        <Camera size={20} />
+                                        <span>Capture</span>
+                                    </button>
+                                    <button
+                                        onClick={toggleCamera}
+                                        className="bg-gray-800/50 text-white p-2 rounded-full backdrop-blur-md"
+                                        title="Switch Camera"
+                                    >
+                                        <RefreshCw size={20} />
+                                    </button>
+                                </div>
                             </div>
                         ) : (
                             <button
-                                onClick={startCamera}
+                                onClick={() => startCamera('environment')}
                                 className="w-full h-32 border-2 border-dashed border-blue-300 dark:border-blue-900 rounded-xl flex flex-col items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-gray-800 transition-colors"
                             >
                                 <Video size={32} className="mb-2" />
                                 <span className="font-semibold">Tap to Open Camera</span>
+                                <span className="text-[10px] opacity-70">Requires permission</span>
                             </button>
                         )}
                     </div>
@@ -256,7 +297,7 @@ const AttendanceHistory: React.FC<{ userId?: string }> = ({ userId }) => {
                         <img src={record.photoUrl} alt="Check-in" className="w-12 h-12 rounded-lg object-cover" />
                     ) : (
                         <div className="w-12 h-12 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                            <User size={20} className="text-gray-400" />
+                            <UserIcon size={20} className="text-gray-400" />
                         </div>
                     )}
                     <div className="flex-1">

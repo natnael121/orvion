@@ -48,7 +48,7 @@ export const EmployeeTasks: React.FC<{ userData: UserData | null }> = ({ userDat
                     startedAt: new Date(),
                     startLocation: { lat: pos.coords.latitude, lng: pos.coords.longitude }
                 })
-                showNotification('Work session started!', 'success')
+                showNotification('success', 'Work session started!')
                 fetchTasks()
             }, async (err) => {
                 // fallback if geo fails
@@ -56,12 +56,12 @@ export const EmployeeTasks: React.FC<{ userData: UserData | null }> = ({ userDat
                     status: 'in_progress',
                     startedAt: new Date()
                 })
-                showNotification('Work session started (No GPS)', 'success')
+                showNotification('warning', 'Work session started (No GPS)')
                 fetchTasks()
             })
         } catch (e) {
             console.error(e)
-            showNotification('Failed to start task', 'error')
+            showNotification('error', 'Failed to update task status')
         }
     }
 
