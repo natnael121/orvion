@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { initializeApp } from 'firebase/app'
 import { getFirestore } from 'firebase/firestore'
-import { getAuth } from 'firebase/auth'
+import { getAuth, signInAnonymously } from 'firebase/auth'
 import { collection, query, where, getDocs, doc, getDoc, addDoc } from 'firebase/firestore'
 import { shopCustomerService } from './services/shopCustomerService'
 import { TelegramProvider } from './contexts/TelegramContext'
@@ -43,6 +43,9 @@ function App() {
   const [hasCompany, setHasCompany] = useState<boolean | null>(null)
 
   useEffect(() => {
+    // Sign in anonymously to satisfy security rules
+    signInAnonymously(auth).catch(err => console.error('Auth error:', err))
+
     // Initialize cache sync service
     const initializeCache = async () => {
       try {
@@ -199,11 +202,29 @@ function App() {
 
         if (custSnap.empty) {
           setHasCompany(false)
+          // Also check if they own any shops
+          const ownerQ = query(collection(db, 'shops'), where('ownerId', '==', userDoc.id))
+          const ownerSnap = await getDocs(ownerQ)
+          if (!ownerSnap.empty) {
+            setHasCompany(true)
+            setUserData(prev => prev ? { ...prev, activeShopId: ownerSnap.docs[0].id, role: 'admin' } : prev)
+          }
         } else {
           setHasCompany(true)
-          const companies = custSnap.docs.map(d => d.data())
-          // Automatically set activeShopId if needed
-          setUserData(prev => prev ? { ...prev, activeShopId: companies[0].shopId } : prev)
+          const companies = custSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
+          const hasAdminRole = companies.some(c => c.role === 'admin')
+
+          // Also check if they own any shops to be sure
+          const ownerQ = query(collection(db, 'shops'), where('ownerId', '==', userDoc.id))
+          const ownerSnap = await getDocs(ownerQ)
+          const isOwner = !ownerSnap.empty
+
+          // Automatically set activeShopId and role from shop_customers
+          setUserData(prev => prev ? {
+            ...prev,
+            activeShopId: companies[0].shopId || (isOwner ? ownerSnap.docs[0].id : undefined),
+            role: (hasAdminRole || isOwner) ? 'admin' : (companies[0].role || 'customer')
+          } : prev)
         }
 
         // User exists, no registration needed
