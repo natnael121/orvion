@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react'
-import { collection, query, where, getDocs } from 'firebase/firestore'
+import { collection, query, where, getDocs, addDoc } from 'firebase/firestore'
 import { useFirebase } from '../../contexts/FirebaseContext'
 import {
     Users, Search, ChevronRight, ArrowLeft, Clock,
-    TrendingUp, Package, Activity
+    TrendingUp, Package, Activity, Plus, Copy, Link, UserPlus, X
 } from 'lucide-react'
 
 interface EmployeeHistoryProps {
@@ -17,7 +17,7 @@ interface EmployeeProfile {
     team: string
     teamId: string
     joinDate: any
-    status: 'active' | 'inactive'
+    status: 'active' | 'inactive' | 'pending'
     telegramId?: number
 }
 
@@ -47,6 +47,12 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
     const [searchTerm, setSearchTerm] = useState('')
     const [profileTab, setProfileTab] = useState<'overview' | 'tasks' | 'attendance' | 'timeline' | 'photos'>('overview')
 
+    // Add Employee States
+    const [isAddingEmployee, setIsAddingEmployee] = useState(false)
+    const [newEmployee, setNewEmployee] = useState({ name: '', role: 'staff', departmentId: '' })
+    const [invitationLink, setInvitationLink] = useState<string | null>(null)
+    const [departments, setDepartments] = useState<any[]>([])
+
     const shopId = userData?.activeShopId || 'hr-system-company'
 
     useEffect(() => {
@@ -56,7 +62,7 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
     const fetchEmployees = async () => {
         setLoading(true)
         try {
-            // Get all shop_customers who are employees (role != 'customer')
+            // Get all shop_customers for this shop
             const custQ = query(collection(db, 'shop_customers'), where('shopId', '==', shopId))
             const custSnap = await getDocs(custQ)
             const customers = custSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
@@ -64,11 +70,12 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
             // Get departments for team mapping
             const deptQ = query(collection(db, 'departments'), where('shopId', '==', shopId))
             const deptSnap = await getDocs(deptQ)
-            const departments = deptSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
+            const depts = deptSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
+            setDepartments(depts)
 
             // Build employee profiles
             const profiles: EmployeeProfile[] = customers.map(c => {
-                const dept = departments.find(d => d.id === c.departmentId)
+                const dept = depts.find(d => d.id === c.departmentId)
                 return {
                     id: c.id,
                     name: c.displayName || c.name || `User ${c.telegramId || c.id.slice(0, 6)}`,
@@ -76,7 +83,7 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                     team: dept?.name || 'Unassigned',
                     teamId: c.departmentId || '',
                     joinDate: c.createdAt || c.joinedAt,
-                    status: 'active',
+                    status: c.status || 'active',
                     telegramId: c.telegramId
                 }
             })
@@ -84,6 +91,40 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
             setEmployees(profiles)
         } catch (e) {
             console.error('Fetch employees error:', e)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const handleAddEmployee = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!newEmployee.name || !newEmployee.departmentId) return
+        setLoading(true)
+        try {
+            const employeeData = {
+                displayName: newEmployee.name,
+                role: newEmployee.role,
+                departmentId: newEmployee.departmentId,
+                shopId: shopId,
+                status: 'pending',
+                isLinked: false,
+                createdAt: new Date(),
+                joinedAt: null
+            }
+
+            const docRef = await addDoc(collection(db, 'shop_customers'), employeeData)
+
+            // Generate Telegram deep link
+            const botUsername = import.meta.env.VITE_TELEGRAM_BOT_USERNAME?.replace('@', '') || 'your_bot'
+            const link = `https://t.me/${botUsername}?start=join_${docRef.id}`
+            setInvitationLink(link)
+
+            // Refresh list
+            fetchEmployees()
+            setIsAddingEmployee(false)
+            setNewEmployee({ name: '', role: 'staff', departmentId: '' })
+        } catch (e) {
+            console.error('Error adding employee:', e)
         } finally {
             setLoading(false)
         }
@@ -170,7 +211,6 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
         return { completed, inProgress, total, completionRate, issues, avgHours, checkIns, checkOuts, materialReqs, efficiencyScore }
     }
 
-    // Get all photos from tasks
     const getAllPhotos = () => {
         const photos: { url: string; taskTitle: string; date: any }[] = []
         employeeTasks.forEach(t => {
@@ -187,7 +227,6 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                 })
             }
         })
-        // Also include attendance photos
         employeeAttendance.forEach(a => {
             if (a.photoUrl) {
                 photos.push({ url: a.photoUrl, taskTitle: 'Attendance Check-in', date: a.timestamp })
@@ -196,7 +235,6 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
         return photos
     }
 
-    // Build timeline
     const getTimeline = () => {
         const events: { date: any; type: string; title: string; detail: string; icon: string }[] = []
 
@@ -237,7 +275,7 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
         e.team.toLowerCase().includes(searchTerm.toLowerCase())
     )
 
-    if (loading && !selectedEmployee) return <div className="p-8 text-center text-gray-500">Loading employees...</div>
+    if (loading && !selectedEmployee && !isAddingEmployee) return <div className="p-8 text-center text-gray-500">Loading employees...</div>
 
     // === EMPLOYEE PROFILE VIEW ===
     if (selectedEmployee) {
@@ -247,12 +285,10 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
 
         return (
             <div className="space-y-4 pb-6">
-                {/* Back button */}
                 <button onClick={() => setSelectedEmployee(null)} className="flex items-center space-x-2 text-blue-600 font-bold text-sm">
                     <ArrowLeft size={18} /> <span>Back to Employee List</span>
                 </button>
 
-                {/* Profile Card */}
                 <div className="bg-gradient-to-r from-slate-800 to-blue-900 p-5 rounded-2xl text-white shadow-lg">
                     <div className="flex items-center space-x-4">
                         <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center text-2xl font-black">
@@ -274,7 +310,6 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                     </div>
                 </div>
 
-                {/* Quick Stats */}
                 <div className="grid grid-cols-4 gap-2">
                     <div className="bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 text-center">
                         <div className="text-lg font-black text-gray-800 dark:text-gray-200">{stats.total}</div>
@@ -294,7 +329,6 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                     </div>
                 </div>
 
-                {/* Profile Tabs */}
                 <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl overflow-x-auto hide-scrollbar">
                     {[
                         { id: 'overview', label: 'Overview', icon: '📊' },
@@ -313,10 +347,8 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                     ))}
                 </div>
 
-                {/* === OVERVIEW TAB === */}
                 {profileTab === 'overview' && (
                     <div className="space-y-4">
-                        {/* Performance Breakdown */}
                         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm p-4">
                             <h4 className="font-bold text-gray-800 dark:text-gray-200 flex items-center mb-3">
                                 <TrendingUp size={18} className="mr-2 text-blue-500" /> Performance Breakdown
@@ -339,8 +371,6 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                                 ))}
                             </div>
                         </div>
-
-                        {/* Key Metrics */}
                         <div className="grid grid-cols-2 gap-3">
                             <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl text-center">
                                 <Clock size={20} className="text-blue-500 mx-auto mb-1" />
@@ -353,166 +383,45 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                                 <div className="text-[10px] text-gray-500 font-bold uppercase">Material Reqs</div>
                             </div>
                         </div>
-
-                        {/* Recent Tasks */}
-                        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                            <div className="p-3 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-100 dark:border-gray-700">
-                                <h4 className="font-bold text-sm text-gray-800 dark:text-gray-200">Recent Tasks</h4>
-                            </div>
-                            <div className="divide-y divide-gray-50 dark:divide-gray-700">
-                                {employeeTasks.slice(0, 5).map(t => (
-                                    <div key={t.id} className="p-3 flex items-center justify-between">
-                                        <div>
-                                            <span className="font-bold text-sm text-gray-800 dark:text-gray-200 truncate block max-w-[200px]">{t.title}</span>
-                                            <span className="text-[10px] text-gray-400">{t.area} • {t.target}</span>
-                                        </div>
-                                        <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${t.status === 'completed' ? 'bg-green-100 text-green-700' : t.status === 'in_progress' ? 'bg-blue-100 text-blue-700' : t.status === 'verification_pending' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
-                                            {t.status?.replace(/_/g, ' ').toUpperCase()}
-                                        </span>
-                                    </div>
-                                ))}
-                                {employeeTasks.length === 0 && <p className="p-4 text-gray-400 text-sm text-center">No tasks yet.</p>}
-                            </div>
-                        </div>
                     </div>
                 )}
 
-                {/* === TASKS TAB === */}
                 {profileTab === 'tasks' && (
                     <div className="space-y-3">
-                        {employeeTasks.length === 0 ? (
-                            <p className="p-8 text-gray-400 text-center bg-white dark:bg-gray-800 rounded-xl">No task records.</p>
-                        ) : employeeTasks.map(t => (
-                            <div key={t.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
-                                <div className="flex justify-between items-start mb-2">
+                        {employeeTasks.length === 0 ? <p className="p-8 text-center text-gray-400 bg-white rounded-xl">No tasks yet.</p> : employeeTasks.map(t => (
+                            <div key={t.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
+                                <div className="flex justify-between items-start">
                                     <div>
                                         <h5 className="font-bold text-sm text-gray-800 dark:text-gray-200">{t.title}</h5>
-                                        <p className="text-[10px] text-gray-400 mt-0.5">{t.area} • Priority: {t.priority}</p>
+                                        <p className="text-[10px] text-gray-400">{t.area}</p>
                                     </div>
-                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${t.status === 'completed' ? 'bg-green-100 text-green-700' : t.status === 'in_progress' ? 'bg-blue-100 text-blue-700' : t.status === 'verification_pending' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
-                                        {t.status?.replace(/_/g, ' ').toUpperCase()}
-                                    </span>
-                                </div>
-                                <div className="grid grid-cols-3 gap-2 text-center text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg p-2">
-                                    <div>
-                                        <div className="font-black text-gray-800 dark:text-gray-200">{t.target || '—'}</div>
-                                        <div className="text-[9px] text-gray-400">Target</div>
-                                    </div>
-                                    <div>
-                                        <div className="font-black text-gray-800 dark:text-gray-200">{t.completedQty || '—'}</div>
-                                        <div className="text-[9px] text-gray-400">Actual</div>
-                                    </div>
-                                    <div>
-                                        <div className="font-black text-gray-800 dark:text-gray-200">
-                                            {t.startedAt && t.completedAt ? (() => {
-                                                const s = t.startedAt?.toDate ? t.startedAt.toDate() : new Date(t.startedAt)
-                                                const e = t.completedAt?.toDate ? t.completedAt.toDate() : new Date(t.completedAt)
-                                                return `${(Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60) * 10) / 10)}h`
-                                            })() : '—'}
-                                        </div>
-                                        <div className="text-[9px] text-gray-400">Duration</div>
-                                    </div>
-                                </div>
-                                {t.progressLogs && t.progressLogs.length > 0 && (
-                                    <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
-                                        <p className="text-[10px] text-gray-400 font-bold mb-1">{t.progressLogs.length} log entries • {t.progressLogs.filter((l: any) => l.isIssue).length} issues</p>
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* === ATTENDANCE TAB === */}
-                {profileTab === 'attendance' && (
-                    <div className="space-y-3">
-                        {/* Summary */}
-                        <div className="grid grid-cols-3 gap-2">
-                            <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-xl text-center">
-                                <div className="text-lg font-black text-blue-600">{stats.checkIns}</div>
-                                <div className="text-[9px] text-gray-500 font-bold uppercase">Check-ins</div>
-                            </div>
-                            <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-xl text-center">
-                                <div className="text-lg font-black text-orange-600">{stats.checkOuts}</div>
-                                <div className="text-[9px] text-gray-500 font-bold uppercase">Check-outs</div>
-                            </div>
-                            <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-xl text-center">
-                                <div className="text-lg font-black text-green-600">{employeeAttendance.length}</div>
-                                <div className="text-[9px] text-gray-500 font-bold uppercase">Total</div>
-                            </div>
-                        </div>
-
-                        {/* Records */}
-                        {employeeAttendance.length === 0 ? (
-                            <p className="p-8 text-gray-400 text-center bg-white dark:bg-gray-800 rounded-xl">No attendance records.</p>
-                        ) : employeeAttendance.map(a => (
-                            <div key={a.id} className="bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm flex items-center space-x-3">
-                                {a.photoUrl ? (
-                                    <img src={a.photoUrl} alt="att" className="w-10 h-10 rounded-lg object-cover" />
-                                ) : (
-                                    <div className="w-10 h-10 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-                                        <Users size={16} className="text-gray-400" />
-                                    </div>
-                                )}
-                                <div className="flex-1">
-                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${a.type === 'check-in' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'}`}>
-                                        {a.type?.toUpperCase()}
-                                    </span>
-                                    <div className="text-[10px] text-gray-400 mt-0.5">
-                                        {a.timestamp?.toDate ? a.timestamp.toDate().toLocaleString() : ''}
-                                    </div>
-                                </div>
-                                <div className="text-[10px] text-gray-400">
-                                    📍 {a.location?.lat?.toFixed(3)}, {a.location?.lng?.toFixed(3)}
+                                    <span className="text-[9px] font-black px-2 py-0.5 rounded bg-blue-100 text-blue-600">{t.status.toUpperCase()}</span>
                                 </div>
                             </div>
                         ))}
                     </div>
                 )}
 
-                {/* === TIMELINE TAB === */}
                 {profileTab === 'timeline' && (
-                    <div className="space-y-0">
-                        {timeline.length === 0 ? (
-                            <p className="p-8 text-gray-400 text-center bg-white dark:bg-gray-800 rounded-xl">No history yet.</p>
-                        ) : timeline.map((event, idx) => (
-                            <div key={idx} className="flex items-start space-x-3 relative">
-                                {/* Line */}
-                                {idx < timeline.length - 1 && (
-                                    <div className="absolute left-[15px] top-8 w-0.5 h-full bg-gray-200 dark:bg-gray-700 z-0" />
-                                )}
-                                <div className="w-8 h-8 rounded-full bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center text-sm z-10 flex-shrink-0">
-                                    {event.icon}
-                                </div>
-                                <div className="flex-1 bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm mb-2">
-                                    <h5 className="font-bold text-xs text-gray-800 dark:text-gray-200">{event.title}</h5>
-                                    <p className="text-[10px] text-gray-400 mt-0.5">{event.detail}</p>
-                                    <p className="text-[10px] text-gray-300 mt-1">
-                                        {event.date?.toDate ? event.date.toDate().toLocaleString() : typeof event.date === 'string' ? new Date(event.date).toLocaleString() : ''}
-                                    </p>
+                    <div className="space-y-4">
+                        {timeline.map((event, i) => (
+                            <div key={i} className="flex items-start space-x-3">
+                                <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-sm">{event.icon}</div>
+                                <div className="flex-1 bg-white p-3 rounded-xl shadow-sm border border-gray-100">
+                                    <h5 className="text-xs font-black">{event.title}</h5>
+                                    <p className="text-[10px] text-gray-500">{event.detail}</p>
+                                    <p className="text-[9px] text-gray-300 mt-1">{event.date?.toDate ? event.date.toDate().toLocaleString() : event.date}</p>
                                 </div>
                             </div>
                         ))}
                     </div>
                 )}
 
-                {/* === PHOTOS TAB === */}
                 {profileTab === 'photos' && (
-                    <div className="space-y-4">
-                        {photos.length === 0 ? (
-                            <p className="p-8 text-gray-400 text-center bg-white dark:bg-gray-800 rounded-xl">No photos found.</p>
-                        ) : (
-                            <div className="grid grid-cols-3 gap-2">
-                                {photos.map((photo, idx) => (
-                                    <div key={idx} className="relative group">
-                                        <img src={photo.url} alt={photo.taskTitle} className="w-full h-24 rounded-xl object-cover border border-gray-200 dark:border-gray-700" />
-                                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 rounded-xl transition-opacity flex items-end p-1.5">
-                                            <span className="text-[9px] text-white font-bold truncate">{photo.taskTitle}</span>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+                    <div className="grid grid-cols-3 gap-2">
+                        {photos.map((p, i) => (
+                            <img key={i} src={p.url} className="w-full h-24 object-cover rounded-xl border border-gray-100 shadow-sm" alt="POW" />
+                        ))}
                     </div>
                 )}
             </div>
@@ -522,32 +431,16 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
     // === EMPLOYEE LIST VIEW ===
     return (
         <div className="space-y-4 pb-6">
-            {/* Header */}
             <div className="bg-gradient-to-r from-slate-800 to-indigo-900 p-5 rounded-2xl text-white shadow-lg">
                 <div className="flex items-center space-x-3 mb-1">
                     <Users className="text-indigo-300" size={26} />
                     <div>
                         <h3 className="text-lg font-black">Employee Profiles</h3>
-                        <p className="text-indigo-300 text-xs">Work history, performance, and accountability tracking</p>
-                    </div>
-                </div>
-                <div className="flex items-center space-x-2 mt-3">
-                    <div className="bg-white/15 backdrop-blur rounded-lg p-2 text-center flex-1">
-                        <div className="text-lg font-black">{employees.length}</div>
-                        <div className="text-[9px] text-indigo-200 uppercase font-bold">Total</div>
-                    </div>
-                    <div className="bg-white/15 backdrop-blur rounded-lg p-2 text-center flex-1">
-                        <div className="text-lg font-black">{employees.filter(e => e.role === 'admin').length}</div>
-                        <div className="text-[9px] text-indigo-200 uppercase font-bold">Admins</div>
-                    </div>
-                    <div className="bg-white/15 backdrop-blur rounded-lg p-2 text-center flex-1">
-                        <div className="text-lg font-black">{employees.filter(e => e.role !== 'admin').length}</div>
-                        <div className="text-[9px] text-indigo-200 uppercase font-bold">Staff</div>
+                        <p className="text-indigo-300 text-xs">Work history and performance tracking</p>
                     </div>
                 </div>
             </div>
 
-            {/* Search */}
             <div className="relative">
                 <Search size={18} className="absolute left-3 top-3 text-gray-400" />
                 <input
@@ -559,29 +452,116 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                 />
             </div>
 
-            {/* Employee List */}
             <div className="space-y-2">
-                {filtered.length === 0 ? (
-                    <p className="p-8 text-gray-400 text-center bg-white dark:bg-gray-800 rounded-xl">
-                        {employees.length === 0 ? 'No employees found. Add users to your company first.' : 'No matching employees.'}
-                    </p>
-                ) : filtered.map(emp => (
+                {filtered.map(emp => (
                     <button
                         key={emp.id}
                         onClick={() => selectEmployee(emp)}
                         className="w-full bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm flex items-center space-x-3 hover:shadow-md transition-shadow text-left"
                     >
-                        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-black text-sm flex-shrink-0">
+                        <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-black text-sm">
                             {emp.name.charAt(0).toUpperCase()}
                         </div>
-                        <div className="flex-1 min-w-0">
-                            <h4 className="font-bold text-sm text-gray-800 dark:text-gray-200 truncate">{emp.name}</h4>
+                        <div className="flex-1">
+                            <h4 className="font-bold text-sm text-gray-800 dark:text-gray-200">{emp.name}</h4>
                             <p className="text-[10px] text-gray-400">{emp.role.toUpperCase()} • {emp.team}</p>
+                            {emp.status === 'pending' && <span className="text-[8px] font-black text-orange-500 animate-pulse">PENDING INVITE</span>}
                         </div>
-                        <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
+                        <ChevronRight size={16} className="text-gray-300" />
                     </button>
                 ))}
             </div>
+
+            {/* Float Add Button */}
+            {!isAddingEmployee && (
+                <button
+                    onClick={() => setIsAddingEmployee(true)}
+                    className="fixed bottom-24 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-2xl flex items-center justify-center animate-bounce"
+                >
+                    <Plus size={24} />
+                </button>
+            )}
+
+            {/* Invitation Link Modal */}
+            {invitationLink && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+                    <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl p-6 space-y-4">
+                        <div className="text-center">
+                            <Link size={32} className="mx-auto text-indigo-600 mb-2" />
+                            <h3 className="text-xl font-black">Invite Created!</h3>
+                            <p className="text-gray-500 text-xs">Share this link with {newEmployee.name || 'the employee'}</p>
+                        </div>
+                        <div className="bg-gray-50 p-4 rounded-xl border border-dashed border-indigo-200 break-all text-[10px] font-mono text-indigo-600">
+                            {invitationLink}
+                        </div>
+                        <button
+                            onClick={() => {
+                                navigator.clipboard.writeText(invitationLink)
+                                alert('Link copied to clipboard!')
+                            }}
+                            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-black flex items-center justify-center space-x-2"
+                        >
+                            <Copy size={18} />
+                            <span>Copy Link</span>
+                        </button>
+                        <button onClick={() => setInvitationLink(null)} className="w-full text-gray-500 text-sm font-bold">Close</button>
+                    </div>
+                </div>
+            )}
+
+            {/* Add Employee Form overlay */}
+            {isAddingEmployee && !invitationLink && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end justify-center">
+                    <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-t-3xl p-6 shadow-2xl space-y-4">
+                        <div className="flex justify-between items-center">
+                            <h3 className="text-xl font-black">Add Employee</h3>
+                            <button onClick={() => setIsAddingEmployee(false)}><X size={24} /></button>
+                        </div>
+                        <form onSubmit={handleAddEmployee} className="space-y-4">
+                            <div>
+                                <label className="text-[10px] font-black text-gray-400 uppercase">Employee Name</label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={newEmployee.name}
+                                    onChange={e => setNewEmployee({ ...newEmployee, name: e.target.value })}
+                                    className="w-full p-4 bg-gray-50 rounded-xl outline-none"
+                                    placeholder="e.g. John Doe"
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[10px] font-black text-gray-400 uppercase">Role</label>
+                                    <select
+                                        value={newEmployee.role}
+                                        onChange={e => setNewEmployee({ ...newEmployee, role: e.target.value })}
+                                        className="w-full p-4 bg-gray-50 rounded-xl outline-none"
+                                    >
+                                        <option value="staff">Field Staff</option>
+                                        <option value="supervisor">Supervisor</option>
+                                        <option value="admin">Admin</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-gray-400 uppercase">Team</label>
+                                    <select
+                                        required
+                                        value={newEmployee.departmentId}
+                                        onChange={e => setNewEmployee({ ...newEmployee, departmentId: e.target.value })}
+                                        className="w-full p-4 bg-gray-50 rounded-xl outline-none"
+                                    >
+                                        <option value="">Select Team</option>
+                                        {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            <button type="submit" className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-lg">
+                                Create Invitation
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
