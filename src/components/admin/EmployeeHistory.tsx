@@ -3,7 +3,7 @@ import { collection, query, where, getDocs, addDoc } from 'firebase/firestore'
 import { useFirebase } from '../../contexts/FirebaseContext'
 import {
     Users, Search, ChevronRight, ArrowLeft, Clock,
-    TrendingUp, Package, Activity, Plus, Copy, Link, UserPlus, X
+    TrendingUp, Package, Plus, Copy, Link, X
 } from 'lucide-react'
 
 interface EmployeeHistoryProps {
@@ -50,6 +50,7 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
     // Add Employee States
     const [isAddingEmployee, setIsAddingEmployee] = useState(false)
     const [newEmployee, setNewEmployee] = useState({ name: '', role: 'staff', departmentId: '' })
+    const [createdEmployeeName, setCreatedEmployeeName] = useState('')
     const [invitationLink, setInvitationLink] = useState<string | null>(null)
     const [departments, setDepartments] = useState<any[]>([])
 
@@ -116,8 +117,10 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
 
             // Generate Telegram deep link
             const botUsername = import.meta.env.VITE_TELEGRAM_BOT_USERNAME?.replace('@', '') || 'your_bot'
-            const link = `https://t.me/${botUsername}?start=join_${docRef.id}`
-            setInvitationLink(link)
+            const deepLink = `https://t.me/${botUsername}?start=join_${docRef.id}`
+
+            setCreatedEmployeeName(newEmployee.name)
+            setInvitationLink(deepLink)
 
             // Refresh list
             fetchEmployees()
@@ -489,7 +492,7 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                         <div className="text-center">
                             <Link size={32} className="mx-auto text-indigo-600 mb-2" />
                             <h3 className="text-xl font-black">Invite Created!</h3>
-                            <p className="text-gray-500 text-xs">Share this link with {newEmployee.name || 'the employee'}</p>
+                            <p className="text-gray-500 text-xs">Share this link with {createdEmployeeName || 'the employee'}</p>
                         </div>
                         <div className="bg-gray-50 p-4 rounded-xl border border-dashed border-indigo-200 break-all text-[10px] font-mono text-indigo-600">
                             {invitationLink}
@@ -499,10 +502,16 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                                 navigator.clipboard.writeText(invitationLink)
                                 alert('Link copied to clipboard!')
                             }}
-                            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-black flex items-center justify-center space-x-2"
+                            className="w-full bg-blue-600 text-white py-3 rounded-xl font-black flex items-center justify-center space-x-2"
                         >
                             <Copy size={18} />
                             <span>Copy Link</span>
+                        </button>
+                        <button
+                            onClick={() => window.open(invitationLink, '_blank')}
+                            className="w-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 py-3 rounded-xl font-bold text-xs"
+                        >
+                            Test Open (External)
                         </button>
                         <button onClick={() => setInvitationLink(null)} className="w-full text-gray-500 text-sm font-bold">Close</button>
                     </div>
