@@ -3,7 +3,7 @@ import { collection, addDoc, query, where, getDocs, orderBy } from 'firebase/fir
 import { useFirebase } from '../contexts/FirebaseContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { UserData } from '../types';
-import { MapPin, Camera, Clock, CheckCircle, Video, Loader2, User as UserIcon, RefreshCw, Upload } from 'lucide-react';
+import { MapPin, Camera, CheckCircle, Loader2, RefreshCw, Upload, Search, Users } from 'lucide-react';
 import { uploadImageToImgBB } from '../services/imgbbService';
 
 interface AttendanceManagerProps {
@@ -20,11 +20,34 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
     const [cameraActive, setCameraActive] = useState(false);
     const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
 
+    // Proxy Check-in States
+    const [employees, setEmployees] = useState<any[]>([]);
+    const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
+    const [isProxyMode, setIsProxyMode] = useState(false);
+
     const videoRef = useRef<HTMLVideoElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
 
+    const canProxy = userData?.role === 'admin' || userData?.role === 'supervisor';
+
+    useEffect(() => {
+        if (canProxy) {
+            fetchEmployees();
+        }
+    }, [canProxy]);
+
+    const fetchEmployees = async () => {
+        try {
+            const q = query(collection(db, 'shop_customers'), where('shopId', '==', userData?.activeShopId || 'hr-system-company'));
+            const snap = await getDocs(q);
+            setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        } catch (e) {
+            console.error("Fetch employees error", e);
+        }
+    };
+
     const startCamera = async (mode: 'user' | 'environment' = 'environment') => {
-        setCameraActive(true); // Show the UI first
+        setCameraActive(true);
         setFacingMode(mode);
 
         try {
@@ -44,17 +67,14 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
 
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
-                // Force play
                 const playPromise = videoRef.current.play();
                 if (playPromise !== undefined) {
-                    playPromise.catch(error => {
-                        console.error("Auto-play was prevented:", error);
-                    });
+                    playPromise.catch(error => console.error("Auto-play prevented", error));
                 }
             }
         } catch (err) {
             console.error("Camera access error:", err);
-            showNotification('error', 'Camera access failed. You can use Manual Upload below.');
+            showNotification('error', 'Camera access failed. Use native camera fallback.');
             setCameraActive(false);
         }
     };
@@ -76,24 +96,18 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
         if (videoRef.current) {
             try {
                 const canvas = document.createElement('canvas');
-                // Use actual video dimensions or fallback
                 const width = videoRef.current.videoWidth || 640;
                 const height = videoRef.current.videoHeight || 480;
-
                 canvas.width = width;
                 canvas.height = height;
-
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
                     ctx.drawImage(videoRef.current, 0, 0, width, height);
                     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-
-                    // Simple check if the image is mostly black (optional but helpful)
                     if (dataUrl.length < 1000) {
-                        showNotification('warning', 'Image capture failed. Try switching cameras.');
+                        showNotification('warning', 'Image capture failed.');
                         return;
                     }
-
                     setPhoto(dataUrl);
                     stopCamera();
                 }
@@ -119,23 +133,20 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
     const getLocation = () => {
         setFetchingLocation(true);
         if (!navigator.geolocation) {
-            showNotification('error', 'Geolocation is not supported');
+            showNotification('error', 'Geolocation not supported');
             setFetchingLocation(false);
             return;
         }
 
         navigator.geolocation.getCurrentPosition(
             (position) => {
-                setLocation({
-                    lat: position.coords.latitude,
-                    lng: position.coords.longitude
-                });
+                setLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
                 setFetchingLocation(false);
-                showNotification('success', 'Location secured');
+                showNotification('success', 'GPS Secure');
             },
             (err) => {
                 console.error("GPS Error:", err);
-                showNotification('error', 'GPS failed. Please enable location on your phone.');
+                showNotification('error', 'GPS failed. Please enable location.');
                 setFetchingLocation(false);
             },
             { enableHighAccuracy: true, timeout: 10000 }
@@ -144,41 +155,61 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
 
     const handleCheckIn = async (type: 'check-in' | 'check-out') => {
         if (!userData?.uid) {
-            showNotification('error', 'Authentication required');
+            showNotification('error', 'Auth required');
             return;
         }
+
+        let targetUserId = userData.uid;
+        let targetUserName = userData.displayName || 'Employee';
+
+        if (isProxyMode) {
+            if (!selectedEmployeeId) {
+                showNotification('error', 'Select an employee to check in');
+                return;
+            }
+            const emp = employees.find(e => e.id === selectedEmployeeId);
+            targetUserId = emp.id;
+            targetUserName = emp.displayName || emp.name || 'Member';
+        }
+
         if (!photo) {
             showNotification('error', 'Capture photo first');
             return;
         }
         if (!location) {
-            showNotification('error', 'GPS location required');
+            showNotification('error', 'GPS required');
             return;
         }
 
         setLoading(true);
         try {
-            showNotification('info', 'Processing attendance...');
+            showNotification('info', 'Processing biometric verification...');
             const photoUrl = await uploadImageToImgBB(photo);
 
             const attendanceData = {
-                userId: userData.uid,
-                userName: userData.displayName || 'Employee',
+                userId: targetUserId,
+                userName: targetUserName,
                 type,
                 timestamp: new Date(),
                 location,
                 photoUrl,
-                status: 'completed'
+                status: 'completed',
+                proxiedBy: isProxyMode ? userData.uid : null,
+                proxiedByName: isProxyMode ? userData.displayName : null
             };
 
             await addDoc(collection(db, 'attendance'), attendanceData);
-            showNotification('success', `Attendance ${type} successful!`);
+            showNotification('success', `Attendance for ${targetUserName} saved!`);
 
             setPhoto(null);
             setLocation(null);
+            if (isProxyMode) {
+                setIsProxyMode(false);
+                setSelectedEmployeeId('');
+            }
         } catch (err) {
             console.error(err);
-            showNotification('error', 'Upload failed. Check your connection.');
+            showNotification('error', 'Submission failed');
         } finally {
             setLoading(false);
         }
@@ -190,94 +221,98 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
 
     return (
         <div className="p-4 space-y-6">
-            <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-xl shadow-gray-200/50 dark:shadow-none border border-gray-100 dark:border-gray-700 p-6 relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
-                    <MapPin size={120} />
-                </div>
-
+            <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-xl border border-gray-100 dark:border-gray-700 p-6 relative overflow-hidden">
                 <div className="relative z-10">
                     <div className="flex justify-between items-start mb-6">
                         <div>
-                            <h2 className="text-2xl font-black text-gray-800 dark:text-white">Daily Presence</h2>
-                            <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">Biometric & GPS Verification</p>
+                            <h2 className="text-2xl font-black text-gray-800 dark:text-white">Attendance</h2>
+                            <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">
+                                {isProxyMode ? '👥 SUPERVISOR PROXY MODE' : '🤳 BIOMETRIC & GPS VERIFICATION'}
+                            </p>
                         </div>
-                        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-2xl">
-                            <Clock className="text-blue-600 dark:text-blue-400" size={24} />
-                        </div>
+                        {canProxy && !isProxyMode && (
+                            <button
+                                onClick={() => setIsProxyMode(true)}
+                                className="bg-blue-600 text-white rounded-xl px-4 py-2 text-[10px] font-black shadow-lg shadow-blue-500/30 flex items-center space-x-1"
+                            >
+                                <Users size={14} />
+                                <span>PROXY MODE</span>
+                            </button>
+                        )}
+                        {isProxyMode && (
+                            <button
+                                onClick={() => setIsProxyMode(false)}
+                                className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-200 rounded-xl px-4 py-2 text-[10px] font-black"
+                            >
+                                EXIT PROXY
+                            </button>
+                        )}
                     </div>
 
                     <div className="space-y-4">
+                        {/* Proxy Selection */}
+                        {isProxyMode && (
+                            <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-2xl border border-blue-100 dark:border-blue-900/30">
+                                <label className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase mb-2 block">SELECT TEAM MEMBER</label>
+                                <div className="relative">
+                                    <select
+                                        value={selectedEmployeeId}
+                                        onChange={e => setSelectedEmployeeId(e.target.value)}
+                                        className="w-full p-4 bg-white dark:bg-gray-800 rounded-xl outline-none font-bold text-sm border border-blue-200 dark:border-blue-900 appearance-none"
+                                    >
+                                        <option value="">-- Search Member --</option>
+                                        {employees.map(emp => (
+                                            <option key={emp.id} value={emp.id}>{emp.displayName || emp.name}</option>
+                                        ))}
+                                    </select>
+                                    <div className="absolute right-4 top-4 pointer-events-none">
+                                        <Search size={18} className="text-blue-500" />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Camera Section */}
                         <div className="bg-gray-50 dark:bg-gray-900 rounded-3xl p-4 border border-gray-200 dark:border-gray-700 overflow-hidden">
                             {photo ? (
-                                <div className="relative rounded-2xl overflow-hidden h-64 w-full bg-black">
+                                <div className="relative rounded-2xl overflow-hidden h-64 w-full bg-black shadow-inner">
                                     <img src={photo} alt="Current" className="w-full h-full object-cover" />
                                     <button
                                         onClick={() => setPhoto(null)}
-                                        className="absolute bottom-4 right-4 bg-red-600 text-white px-4 py-2 rounded-xl font-bold shadow-lg"
+                                        className="absolute bottom-4 right-4 bg-red-600 text-white px-6 py-2 rounded-xl font-black shadow-xl"
                                     >
-                                        Retake Photo
+                                        RETAKE
                                     </button>
                                 </div>
                             ) : cameraActive ? (
                                 <div className="relative rounded-2xl overflow-hidden h-64 w-full bg-black">
-                                    <video
-                                        ref={videoRef}
-                                        autoPlay
-                                        playsInline
-                                        muted
-                                        className="w-full h-full object-cover"
-                                    />
+                                    <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
                                     <div className="absolute bottom-4 left-0 right-0 flex justify-center space-x-3 px-4">
-                                        <button
-                                            onClick={capturePhoto}
-                                            className="bg-white text-blue-600 rounded-2xl px-6 py-3 font-black shadow-xl flex items-center space-x-2 active:scale-90 transition-transform flex-1 justify-center"
-                                        >
+                                        <button onClick={capturePhoto} className="bg-white text-blue-600 rounded-2xl px-6 py-4 font-black shadow-2xl flex items-center space-x-2 flex-1 justify-center">
                                             <Camera size={20} />
-                                            <span>TAKE PHOTO</span>
+                                            <span>TAKE DATA PHOTO</span>
                                         </button>
-                                        <button
-                                            onClick={toggleCamera}
-                                            className="bg-gray-900/40 text-white p-3 rounded-2xl backdrop-blur-md"
-                                        >
+                                        <button onClick={toggleCamera} className="bg-black/40 text-white p-4 rounded-2xl backdrop-blur-md">
                                             <RefreshCw size={24} />
-                                        </button>
-                                        <button
-                                            onClick={stopCamera}
-                                            className="bg-red-600/20 text-red-600 p-3 rounded-2xl backdrop-blur-md"
-                                        >
-                                            <Upload className="rotate-180" size={24} />
                                         </button>
                                     </div>
                                 </div>
                             ) : (
-                                <div className="space-y-3">
+                                <div className="space-y-4">
                                     <button
                                         onClick={() => startCamera('environment')}
-                                        className="w-full h-40 border-4 border-dashed border-blue-100 dark:border-blue-900/30 rounded-3xl flex flex-col items-center justify-center text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors"
+                                        className="w-full h-40 border-4 border-dashed border-blue-100 dark:border-blue-900/30 rounded-3xl flex flex-col items-center justify-center text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800/50 hover:bg-blue-50 transition-all"
                                     >
-                                        <div className="bg-blue-100 dark:bg-blue-900/40 p-4 rounded-full mb-3">
+                                        <div className="bg-blue-600 text-white p-4 rounded-2xl mb-3 shadow-lg shadow-blue-500/40">
                                             <Camera size={32} />
                                         </div>
-                                        <span className="font-black text-sm">OPEN FIELD CAMERA</span>
+                                        <span className="font-black text-sm">OPEN FIELD SCANNER</span>
                                     </button>
 
-                                    <div className="flex items-center space-x-2">
-                                        <div className="h-px bg-gray-200 flex-1"></div>
-                                        <span className="text-[10px] font-black text-gray-400">OR USE SYSTEM</span>
-                                        <div className="h-px bg-gray-200 flex-1"></div>
-                                    </div>
-
-                                    <label className="w-full py-4 bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 rounded-2xl font-bold flex items-center justify-center cursor-pointer active:bg-gray-200">
+                                    <label className="w-full py-4 bg-gray-50 dark:bg-gray-700/50 text-gray-500 rounded-2xl font-bold flex items-center justify-center cursor-pointer border border-gray-100 dark:border-gray-600">
                                         <Upload size={18} className="mr-2" />
-                                        <span>SYSTEM CAMERA / GALLERY</span>
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            capture="environment"
-                                            className="hidden"
-                                            onChange={handleFileInput}
-                                        />
+                                        <span>SYSTEM CAMERA / BROWSE</span>
+                                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFileInput} />
                                     </label>
                                 </div>
                             )}
@@ -285,56 +320,48 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({ userData }
 
                         {/* Location Section */}
                         <div className="bg-gray-50 dark:bg-gray-900 rounded-3xl p-5 border border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                            <div className="flex items-center space-x-3">
-                                <div className={`p-3 rounded-2xl ${location ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-200 text-gray-500 dark:bg-gray-700'}`}>
+                            <div className="flex items-center space-x-3 text-left">
+                                <div className={`p-4 rounded-xl ${location ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
                                     <MapPin size={24} />
                                 </div>
                                 <div>
-                                    <p className="font-black text-sm uppercase tracking-tight">{location ? 'Location Secured' : 'GPS Authentication'}</p>
-                                    <p className="text-[10px] font-bold text-gray-400 truncate max-w-[140px]">
-                                        {location ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}` : 'Wait for precision fix'}
+                                    <p className="font-black text-xs uppercase text-gray-400 tracking-widest">{location ? 'POS SECURED' : 'GPS AUTH'}</p>
+                                    <p className="text-[10px] font-black text-gray-800 dark:text-white truncate max-w-[140px]">
+                                        {location ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}` : 'Awaiting Satellite fix...'}
                                     </p>
                                 </div>
                             </div>
                             {!location ? (
-                                <button
-                                    onClick={getLocation}
-                                    disabled={fetchingLocation}
-                                    className="bg-gray-800 text-white px-5 py-2.5 rounded-2xl text-xs font-black shadow-lg shadow-gray-900/10 disabled:opacity-50"
-                                >
-                                    {fetchingLocation ? <Loader2 className="animate-spin w-4 h-4" /> : 'FETCH GPS'}
+                                <button onClick={getLocation} disabled={fetchingLocation} className="bg-blue-600 text-white px-6 py-3 rounded-2xl text-xs font-black">
+                                    {fetchingLocation ? <Loader2 className="animate-spin" /> : 'FETCH GPS'}
                                 </button>
                             ) : (
-                                <CheckCircle className="text-emerald-500" size={28} />
+                                <CheckCircle className="text-emerald-500" size={32} />
                             )}
                         </div>
 
-                        {/* Actions Section */}
+                        {/* Final Actions */}
                         <div className="grid grid-cols-2 gap-4 pt-4">
                             <button
                                 onClick={() => handleCheckIn('check-in')}
                                 disabled={loading || !photo || !location}
-                                className="py-4 bg-gradient-to-br from-indigo-600 to-blue-600 disabled:from-gray-300 disabled:to-gray-400 text-white rounded-[2rem] font-black flex items-center justify-center space-x-2 transition-all shadow-xl shadow-blue-500/20 active:scale-95"
+                                className="py-5 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-[2rem] font-black shadow-xl shadow-blue-500/20 disabled:from-gray-300 active:scale-95 transition-all"
                             >
-                                {loading ? <Loader2 className="animate-spin" /> : <Clock size={20} />}
-                                <span>CHECK IN</span>
+                                START SHIFT
                             </button>
-
                             <button
                                 onClick={() => handleCheckIn('check-out')}
                                 disabled={loading || !photo || !location}
-                                className="py-4 bg-gradient-to-br from-orange-500 to-red-600 disabled:from-gray-300 disabled:to-gray-400 text-white rounded-[2rem] font-black flex items-center justify-center space-x-2 transition-all shadow-xl shadow-orange-500/20 active:scale-95"
+                                className="py-5 bg-gradient-to-br from-orange-500 to-red-600 text-white rounded-[2rem] font-black shadow-xl shadow-orange-500/20 disabled:from-gray-300 active:scale-95 transition-all"
                             >
-                                {loading ? <Loader2 className="animate-spin" /> : <Clock size={20} />}
-                                <span>CHECK OUT</span>
+                                END SHIFT
                             </button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* Attendance History */}
-            <h3 className="font-black text-gray-800 dark:text-white px-2 mt-4 text-lg">My Activity Log</h3>
+            <h3 className="font-black text-gray-800 dark:text-white px-2 text-lg">Activity Journal</h3>
             <AttendanceHistory userId={userData?.uid} />
         </div>
     );
@@ -352,44 +379,29 @@ const AttendanceHistory: React.FC<{ userId?: string }> = ({ userId }) => {
                 const snap = await getDocs(q);
                 setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
             } catch (e) {
-                console.error("Failed to fetch history", e);
+                console.error("Failed history", e);
             }
         };
         fetchHistory();
     }, [userId, db]);
 
-    if (history.length === 0) {
-        return <div className="p-8 text-center text-gray-400 text-xs font-bold uppercase tracking-widest border-2 border-dashed border-gray-100 dark:border-gray-800 rounded-3xl">No entries yet.</div>;
-    }
+    if (history.length === 0) return null;
 
     return (
         <div className="space-y-3 pb-24">
             {history.slice(0, 5).map(record => (
-                <div key={record.id} className="bg-white dark:bg-gray-800 p-4 rounded-3xl shadow-sm border border-gray-50 dark:border-gray-700 flex items-center space-x-4">
-                    {record.photoUrl ? (
-                        <div className="relative">
-                            <img src={record.photoUrl} alt="Check-in" className="w-14 h-14 rounded-2xl object-cover ring-2 ring-gray-50 dark:ring-gray-900" />
-                            <div className={`absolute -bottom-1 -right-1 p-1 rounded-full text-white ${record.type === 'check-in' ? 'bg-blue-500' : 'bg-orange-500 shadow-lg'}`}>
-                                <Clock size={10} />
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                            <UserIcon size={24} className="text-gray-400" />
-                        </div>
-                    )}
+                <div key={record.id} className="bg-white dark:bg-gray-800 p-4 rounded-[2rem] shadow-sm border border-gray-50 flex items-center space-x-4">
+                    {record.photoUrl && <img src={record.photoUrl} className="w-14 h-14 rounded-2xl object-cover" alt="Log" />}
                     <div className="flex-1">
-                        <div className="flex items-center justify-between">
-                            <span className={`font-black text-xs uppercase tracking-wider ${record.type === 'check-in' ? 'text-indigo-600' : 'text-orange-600'}`}>
-                                {record.type === 'check-in' ? 'WORK COMMENCED' : 'WORK CONCLUDED'}
+                        <div className="flex justify-between">
+                            <span className={`font-black text-[10px] uppercase ${record.type === 'check-in' ? 'text-blue-600' : 'text-orange-500'}`}>
+                                {record.type} {record.proxiedBy ? '• BY SUPERVISOR' : ''}
                             </span>
-                            <span className="text-[10px] font-black text-gray-400 bg-gray-50 dark:bg-gray-900 px-2 py-1 rounded-md">
-                                {record.timestamp?.toDate ? record.timestamp.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                            <span className="text-[10px] font-bold text-gray-400">
+                                {record.timestamp?.toDate ? record.timestamp.toDate().toLocaleTimeString() : ''}
                             </span>
                         </div>
-                        <p className="text-[10px] font-bold text-gray-400 mt-1">
-                            {record.timestamp?.toDate ? record.timestamp.toDate().toLocaleDateString() : ''} • GPS VERIFIED
-                        </p>
+                        <h4 className="font-black text-xs text-gray-800 dark:text-white mt-1">{record.userName}</h4>
                     </div>
                 </div>
             ))}

@@ -42,7 +42,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ userData }) => {
       setLeaveRequests(leaveSnap.docs.map(d => ({ id: d.id, ...d.data() })))
     } catch (e) {
       console.error("Fetch Data Error", e)
-      showNotification('Failed to load HR data', 'error')
+      showNotification('error', 'Failed to load HR data')
     } finally {
       setLoading(false)
     }
@@ -56,11 +56,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ userData }) => {
   const handleUpdateLeaveStatus = async (id: string, status: 'approved' | 'rejected') => {
     try {
       await updateDoc(doc(db, 'leave_requests', id), { status })
-      showNotification(`Leave request ${status}`, 'success')
+      showNotification('success', `Leave request ${status}`)
       fetchData()
     } catch (e) {
       console.error(e)
-      showNotification('Failed to update leave request', 'error')
+      showNotification('error', 'Failed to update leave request')
     }
   }
 
@@ -101,6 +101,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ userData }) => {
       <div className="grid grid-cols-3 gap-2">
         {[
           { id: 'ops', label: 'Ops Center', emoji: '⚡', color: 'cyan', bg: 'from-cyan-500 to-blue-600' },
+          { id: 'map', label: 'Live Map', emoji: '🗺️', color: 'blue', bg: 'from-blue-600 to-indigo-700' },
           { id: 'performance', label: 'Performance', emoji: '📈', color: 'violet', bg: 'from-violet-500 to-fuchsia-600' },
           { id: 'tasks', label: 'Tasks', emoji: '📋', color: 'green', bg: 'from-green-500 to-emerald-600' },
           { id: 'roles', label: 'Teams', emoji: '👥', color: 'orange', bg: 'from-orange-500 to-amber-600' },

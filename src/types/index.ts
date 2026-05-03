@@ -14,7 +14,8 @@ export interface UserData {
   displayName?: string
   phone?: string
   bio?: string
-  role: 'shop_owner' | 'admin'
+  role: 'shop_owner' | 'admin' | 'supervisor' | 'staff' | 'employee'
+  activeShopId?: string
   telegramId?: number
   telegram_id?: number // Add for compatibility with different field names
   telegramBotToken?: string
