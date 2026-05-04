@@ -73,10 +73,11 @@ function App() {
       tg.setHeaderColor('#2481cc')
 
       // Get user data from Telegram
-      const telegramUser = tg.initDataUnsafe?.user
-      const startParameter = tg.initDataUnsafe?.start_param
+      const initData = tg.initDataUnsafe as any
+      const telegramUser = initData?.user
+      const startParameter = initData?.start_param || initData?.start_app || initData?.startapp
 
-      console.log('Telegram WebApp initDataUnsafe:', tg.initDataUnsafe)
+      console.log('Telegram WebApp initDataUnsafe:', initData)
       console.log('Telegram start parameter:', startParameter)
 
       if (startParameter) {
@@ -144,31 +145,24 @@ function App() {
 
       console.log('Shop access result:', { shopId, productId, isNewCustomer: result.isNewCustomer })
 
-      // If user was newly created, update userData state and reload
-      if (result.isNewCustomer) {
-        const usersRef = collection(db, 'users')
-        const userQuery = query(usersRef, where('telegramId', '==', currentUser.telegramId || parseInt(currentUser.id)))
-        const userSnapshot = await getDocs(userQuery)
+      // If user was newly created or linked, handle specific join result
+      if (result.success) {
+        setHasCompany(true)
+        setCurrentView('hr')
 
-        if (!userSnapshot.empty) {
-          const userDoc = userSnapshot.docs[0]
-          const newUserData = userDoc.data() as UserData
-          const updatedUserData = {
-            ...newUserData,
-            uid: userDoc.id,
-            createdAt: newUserData.createdAt?.toDate?.() || new Date(),
-            updatedAt: newUserData.updatedAt?.toDate?.() || new Date()
+        // Refresh local userData if we have a telegram user
+        if (currentUser.telegramId) {
+          const usersRef = collection(db, 'users')
+          const userQuery = query(usersRef, where('telegramId', '==', currentUser.telegramId))
+          const userSnapshot = await getDocs(userQuery)
+          if (!userSnapshot.empty) {
+            const userDoc = userSnapshot.docs[0]
+            setUserData({ ...userDoc.data(), uid: userDoc.id } as UserData)
           }
-          setUserData(updatedUserData)
-
-          // Small delay to ensure state is updated before proceeding
-          await new Promise(resolve => setTimeout(resolve, 100))
         }
       }
 
-      console.log('User registered to shop, switching to hr view')
-      setHasCompany(true)
-      setCurrentView('hr')
+      console.log('User registered to shop via link, state updated')
     } catch (error) {
       console.error('Error handling start parameter:', error)
     }
@@ -192,8 +186,8 @@ function App() {
         setUserData({
           ...userData,
           uid: userDoc.id,
-          createdAt: userData.createdAt?.toDate?.() || new Date(),
-          updatedAt: userData.updatedAt?.toDate?.() || new Date()
+          createdAt: (userData.createdAt as any)?.toDate ? (userData.createdAt as any).toDate() : new Date(),
+          updatedAt: (userData.updatedAt as any)?.toDate ? (userData.updatedAt as any).toDate() : new Date()
         })
 
         // Check if user belongs to any company
