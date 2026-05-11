@@ -3,7 +3,7 @@ import { collection, addDoc, query, where, getDocs, updateDoc, doc, deleteDoc, o
 import { useFirebase } from '../../contexts/FirebaseContext'
 import { useNotification } from '../../contexts/NotificationContext'
 import { UserData, Shop } from '../../types'
-import { Users, Clock, CheckCircle, Plus, Copy, Link, PlusCircle, UserPlus, ListTodo } from 'lucide-react'
+import { Users, Clock, CheckCircle, Plus, Copy, Link, PlusCircle, UserPlus, ListTodo, Search, XCircle, AlertCircle } from 'lucide-react'
 
 export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userData }) => {
     const { db } = useFirebase()
@@ -12,6 +12,12 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
     const [newCompanyName, setNewCompanyName] = useState('')
     const [loading, setLoading] = useState(false)
     const [requests, setRequests] = useState<any[]>([])
+
+    // Add by username state
+    const [addUsername, setAddUsername] = useState('')
+    const [searchingUser, setSearchingUser] = useState(false)
+    const [userSearchResults, setUserSearchResults] = useState<any[]>([])
+    const [addingToCompanyId, setAddingToCompanyId] = useState<string | null>(null)
 
     const fetchCompanies = async () => {
         if (!userData?.uid) return
@@ -123,6 +129,71 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
         }
     }
 
+    // Search users by name or username
+    const handleSearchUser = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!addUsername.trim()) return
+
+        setSearchingUser(true)
+        setUserSearchResults([])
+        try {
+            const usersSnap = await getDocs(collection(db, 'users'))
+            const searchTerm = addUsername.toLowerCase().trim()
+            const matches = usersSnap.docs
+                .map(d => ({ uid: d.id, ...d.data() }))
+                .filter((u: any) => {
+                    const name = (u.displayName || u.first_name || u.name || '').toLowerCase()
+                    const username = (u.username || u.settings?.telegram?.username || '').toLowerCase()
+                    const email = (u.email || '').toLowerCase()
+                    return name.includes(searchTerm) || username.includes(searchTerm) || email.includes(searchTerm)
+                })
+            setUserSearchResults(matches)
+            if (matches.length === 0) {
+                showNotification('No users found with that name', 'error')
+            }
+        } catch (e) {
+            console.error(e)
+            showNotification('Failed to search users', 'error')
+        } finally {
+            setSearchingUser(false)
+        }
+    }
+
+    // Add user directly to company
+    const handleAddUserToCompany = async (companyId: string, targetUser: any) => {
+        try {
+            // Check if user is already in this company
+            const existingQ = query(
+                collection(db, 'shop_customers'),
+                where('shopId', '==', companyId),
+                where('customerId', '==', targetUser.uid)
+            )
+            const existingSnap = await getDocs(existingQ)
+            if (!existingSnap.empty) {
+                showNotification('User is already a member of this company', 'error')
+                return
+            }
+
+            await addDoc(collection(db, 'shop_customers'), {
+                shopId: companyId,
+                customerId: targetUser.uid,
+                telegramId: targetUser.telegramId || targetUser.telegram_id || 0,
+                role: 'employee',
+                createdAt: new Date(),
+                updatedAt: new Date()
+            })
+
+            showNotification(`Added ${targetUser.displayName || targetUser.first_name || 'user'} to company!`, 'success')
+            setAddUsername('')
+            setUserSearchResults([])
+            setAddingToCompanyId(null)
+            fetchCompanies()
+        } catch (e) {
+            console.error(e)
+            showNotification('Failed to add user', 'error')
+        }
+    }
+
     return (
         <div className="space-y-4">
             <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
@@ -146,6 +217,52 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
                 </form>
             </div>
 
+            {/* Pending Join Requests Section */}
+            {requests.length > 0 && (
+                <div className="bg-white dark:bg-gray-800 p-5 rounded-xl border border-orange-200 dark:border-orange-900/40 shadow-sm">
+                    <div className="flex items-center space-x-2 mb-4">
+                        <div className="w-8 h-8 bg-orange-100 dark:bg-orange-900/30 rounded-lg flex items-center justify-center">
+                            <AlertCircle size={18} className="text-orange-600" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-gray-800 dark:text-gray-200">Pending Join Requests</h3>
+                            <p className="text-[10px] text-gray-500 uppercase font-bold">{requests.length} awaiting approval</p>
+                        </div>
+                    </div>
+                    <div className="space-y-3">
+                        {requests.map((req: any) => (
+                            <div key={req.id} className="bg-gray-50 dark:bg-gray-900 p-4 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                                <div>
+                                    <h4 className="font-bold text-sm text-gray-800 dark:text-gray-200">
+                                        {req.userName || 'Unknown User'}
+                                    </h4>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                        Wants to join <span className="font-semibold text-blue-600">{req.companyName || 'Company'}</span>
+                                    </p>
+                                    <p className="text-[10px] text-gray-400 mt-1">
+                                        {req.createdAt?.toDate ? req.createdAt.toDate().toLocaleDateString() : 'Recently'}
+                                    </p>
+                                </div>
+                                <div className="flex space-x-2">
+                                    <button
+                                        onClick={() => handleApprove(req)}
+                                        className="px-3 py-2 bg-green-600 text-white font-bold text-xs rounded-lg shadow-sm flex items-center hover:bg-green-700 transition-colors"
+                                    >
+                                        <CheckCircle size={14} className="mr-1" /> Approve
+                                    </button>
+                                    <button
+                                        onClick={() => handleReject(req.id)}
+                                        className="px-3 py-2 bg-red-50 text-red-600 font-bold text-xs rounded-lg flex items-center hover:bg-red-100 transition-colors"
+                                    >
+                                        <XCircle size={14} className="mr-1" /> Reject
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             <div className="space-y-3">
                 <h3 className="font-bold text-gray-700 dark:text-gray-300 ml-1">My Managed Companies</h3>
                 {companies.length === 0 ? (
@@ -153,14 +270,77 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
                 ) : companies.map(comp => (
                     <div key={comp.id} className="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
                         <div className="flex justify-between items-start">
-                            <div>
+                            <div className="flex-1">
                                 <h4 className="font-bold text-lg">{comp.name}</h4>
                                 <p className="text-xs text-gray-500 max-w-sm mt-1">{comp.description}</p>
-                                <div className="mt-3 text-xs bg-blue-50 text-blue-700 px-3 py-2 rounded flex items-center font-mono">
-                                    <Link size={14} className="mr-2" />
-                                    https://t.me/your_bot?startapp={comp.id}
-                                </div>
                             </div>
+                        </div>
+
+                        {/* Add Employee by Username */}
+                        <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                            <div className="flex items-center space-x-2 mb-3">
+                                <UserPlus size={16} className="text-blue-600" />
+                                <span className="text-sm font-bold text-gray-700 dark:text-gray-300">Add Employee</span>
+                            </div>
+
+                            {addingToCompanyId === comp.id ? (
+                                <div className="space-y-3">
+                                    <form onSubmit={handleSearchUser} className="flex space-x-2">
+                                        <input
+                                            type="text"
+                                            value={addUsername}
+                                            onChange={e => setAddUsername(e.target.value)}
+                                            placeholder="Search by name or username..."
+                                            className="flex-1 px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                                        />
+                                        <button
+                                            type="submit"
+                                            disabled={searchingUser}
+                                            className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold flex items-center disabled:opacity-50"
+                                        >
+                                            <Search size={14} className="mr-1" /> {searchingUser ? '...' : 'Find'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setAddingToCompanyId(null); setUserSearchResults([]); setAddUsername(''); }}
+                                            className="px-2 py-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg text-sm"
+                                        >
+                                            <XCircle size={16} />
+                                        </button>
+                                    </form>
+
+                                    {/* Search Results */}
+                                    {userSearchResults.length > 0 && (
+                                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                                            {userSearchResults.map((u: any) => (
+                                                <div key={u.uid} className="bg-gray-50 dark:bg-gray-900 p-3 rounded-lg border border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                                                    <div>
+                                                        <p className="font-bold text-sm text-gray-800 dark:text-gray-200">
+                                                            {u.displayName || u.first_name || u.name || 'User'}
+                                                        </p>
+                                                        <p className="text-[10px] text-gray-500">
+                                                            {u.email || (u.settings?.telegram?.username ? `@${u.settings.telegram.username}` : `ID: ${u.uid.substring(0, 8)}...`)}
+                                                        </p>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleAddUserToCompany(comp.id, u)}
+                                                        className="px-3 py-1.5 bg-green-600 text-white font-bold text-xs rounded-lg shadow-sm flex items-center hover:bg-green-700 transition-colors"
+                                                    >
+                                                        <Plus size={12} className="mr-1" /> Add
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <button
+                                    onClick={() => setAddingToCompanyId(comp.id)}
+                                    className="w-full py-2.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg text-sm font-bold flex items-center justify-center hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+                                >
+                                    <UserPlus size={16} className="mr-2" /> Add Employee by Name
+                                </button>
+                            )}
                         </div>
                     </div>
                 ))}
