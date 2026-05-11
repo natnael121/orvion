@@ -23,7 +23,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ userData }) => {
   const { db } = useFirebase()
   const { showNotification } = useNotification()
 
-  const [activeTab, setActiveTab] = useState<'ops' | 'map' | 'performance' | 'hr' | 'employees' | 'companies' | 'tasks' | 'roles' | 'finance' | 'crm' | 'inventory' | 'materials'>('ops')
+  const [activeTab, setActiveTab] = useState<'ops' | 'map' | 'performance' | 'hr' | 'employees' | 'companies' | 'tasks' | 'roles' | 'finance' | 'crm' | 'inventory' | 'materials'>(userData?.role === 'supervisor' ? 'hr' : 'ops')
   const [hrSubTab, setHrSubTab] = useState<'attendance' | 'leaves' | 'stats'>('attendance')
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([])
   const [leaveRequests, setLeaveRequests] = useState<any[]>([])
@@ -113,7 +113,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ userData }) => {
           { id: 'finance', label: 'Finance', emoji: '💰', color: 'emerald', bg: 'from-emerald-500 to-teal-600' },
           { id: 'crm', label: 'CRM', emoji: '🤝', color: 'rose', bg: 'from-rose-500 to-red-600' },
           { id: 'inventory', label: 'Inventory', emoji: '🏪', color: 'teal', bg: 'from-teal-500 to-cyan-600' },
-        ].map(tab => (
+        ]
+        .filter(tab => {
+          // Supervisors only see essential tabs
+          if (userData?.role === 'supervisor') {
+            return ['hr', 'tasks', 'employees', 'materials', 'performance', 'map'].includes(tab.id)
+          }
+          return true // admin/shop_owner sees all
+        })
+        .map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
