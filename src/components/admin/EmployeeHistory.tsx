@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { collection, query, where, getDocs, addDoc } from 'firebase/firestore'
 import { useFirebase } from '../../contexts/FirebaseContext'
+import { useNotification } from '../../contexts/NotificationContext'
 import {
     Users, Search, ChevronRight, ArrowLeft, Clock,
     TrendingUp, Package, Plus, Copy, Link, X
@@ -38,6 +39,7 @@ interface TaskRecord {
 
 export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) => {
     const { db } = useFirebase()
+    const { showNotification } = useNotification()
     const [employees, setEmployees] = useState<EmployeeProfile[]>([])
     const [selectedEmployee, setSelectedEmployee] = useState<EmployeeProfile | null>(null)
     const [employeeTasks, setEmployeeTasks] = useState<TaskRecord[]>([])
@@ -47,11 +49,8 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
     const [searchTerm, setSearchTerm] = useState('')
     const [profileTab, setProfileTab] = useState<'overview' | 'tasks' | 'attendance' | 'timeline' | 'photos'>('overview')
 
-    // Add Employee States
     const [isAddingEmployee, setIsAddingEmployee] = useState(false)
-    const [newEmployee, setNewEmployee] = useState({ name: '', role: 'staff', departmentId: '' })
-    const [createdEmployeeName, setCreatedEmployeeName] = useState('')
-    const [invitationLink, setInvitationLink] = useState<string | null>(null)
+    const [newEmployee, setNewEmployee] = useState({ telegramUsername: '', name: '', role: 'staff', departmentId: '' })
     const [departments, setDepartments] = useState<any[]>([])
 
     const shopId = userData?.activeShopId || 'hr-system-company'
@@ -99,35 +98,29 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
 
     const handleAddEmployee = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!newEmployee.name || !newEmployee.departmentId) return
+        const username = newEmployee.telegramUsername.trim().replace('@', '')
+        if (!username || !newEmployee.departmentId) return
         setLoading(true)
         try {
-            const employeeData = {
-                displayName: newEmployee.name,
+            await addDoc(collection(db, 'shop_customers'), {
+                displayName: newEmployee.name || `@${username}`,
+                telegramUsername: username,
                 role: newEmployee.role,
                 departmentId: newEmployee.departmentId,
                 shopId: shopId,
-                status: 'pending',
+                status: 'pending_link',
                 isLinked: false,
                 createdAt: new Date(),
                 joinedAt: null
-            }
+            })
 
-            const docRef = await addDoc(collection(db, 'shop_customers'), employeeData)
-
-            // Generate Telegram deep link
-            const botUsername = import.meta.env.VITE_TELEGRAM_BOT_USERNAME?.replace('@', '') || 'your_bot'
-            const deepLink = `https://t.me/${botUsername}?start=join_${docRef.id}`
-
-            setCreatedEmployeeName(newEmployee.name)
-            setInvitationLink(deepLink)
-
-            // Refresh list
+            showNotification(`Added @${username}! They'll be linked when they open the app.`, 'success')
             fetchEmployees()
             setIsAddingEmployee(false)
-            setNewEmployee({ name: '', role: 'staff', departmentId: '' })
+            setNewEmployee({ telegramUsername: '', name: '', role: 'staff', departmentId: '' })
         } catch (e) {
             console.error('Error adding employee:', e)
+            showNotification('Failed to add employee', 'error')
         } finally {
             setLoading(false)
         }
@@ -485,41 +478,8 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                 </button>
             )}
 
-            {/* Invitation Link Modal */}
-            {invitationLink && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-                    <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl p-6 space-y-4">
-                        <div className="text-center">
-                            <Link size={32} className="mx-auto text-indigo-600 mb-2" />
-                            <h3 className="text-xl font-black">Invite Created!</h3>
-                            <p className="text-gray-500 text-xs">Share this link with {createdEmployeeName || 'the employee'}</p>
-                        </div>
-                        <div className="bg-gray-50 p-4 rounded-xl border border-dashed border-indigo-200 break-all text-[10px] font-mono text-indigo-600">
-                            {invitationLink}
-                        </div>
-                        <button
-                            onClick={() => {
-                                navigator.clipboard.writeText(invitationLink)
-                                alert('Link copied to clipboard!')
-                            }}
-                            className="w-full bg-blue-600 text-white py-3 rounded-xl font-black flex items-center justify-center space-x-2"
-                        >
-                            <Copy size={18} />
-                            <span>Copy Link</span>
-                        </button>
-                        <button
-                            onClick={() => window.open(invitationLink, '_blank')}
-                            className="w-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 py-3 rounded-xl font-bold text-xs"
-                        >
-                            Test Open (External)
-                        </button>
-                        <button onClick={() => setInvitationLink(null)} className="w-full text-gray-500 text-sm font-bold">Close</button>
-                    </div>
-                </div>
-            )}
-
             {/* Add Employee Form overlay */}
-            {isAddingEmployee && !invitationLink && (
+            {isAddingEmployee && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end justify-center">
                     <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-t-3xl p-6 shadow-2xl space-y-4">
                         <div className="flex justify-between items-center">
@@ -528,10 +488,20 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                         </div>
                         <form onSubmit={handleAddEmployee} className="space-y-4">
                             <div>
-                                <label className="text-[10px] font-black text-gray-400 uppercase">Employee Name</label>
+                                <label className="text-[10px] font-black text-gray-400 uppercase">Telegram Username</label>
                                 <input
                                     type="text"
                                     required
+                                    value={newEmployee.telegramUsername}
+                                    onChange={e => setNewEmployee({ ...newEmployee, telegramUsername: e.target.value })}
+                                    className="w-full p-4 bg-gray-50 rounded-xl outline-none"
+                                    placeholder="@username"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black text-gray-400 uppercase">Display Name (optional)</label>
+                                <input
+                                    type="text"
                                     value={newEmployee.name}
                                     onChange={e => setNewEmployee({ ...newEmployee, name: e.target.value })}
                                     className="w-full p-4 bg-gray-50 rounded-xl outline-none"
@@ -546,6 +516,7 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                                         onChange={e => setNewEmployee({ ...newEmployee, role: e.target.value })}
                                         className="w-full p-4 bg-gray-50 rounded-xl outline-none"
                                     >
+                                        <option value="employee">Employee</option>
                                         <option value="staff">Field Staff</option>
                                         <option value="supervisor">Supervisor</option>
                                         <option value="admin">Admin</option>
@@ -565,7 +536,7 @@ export const EmployeeHistory: React.FC<EmployeeHistoryProps> = ({ userData }) =>
                                 </div>
                             </div>
                             <button type="submit" className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-lg">
-                                Create Invitation
+                                Add Employee
                             </button>
                         </form>
                     </div>

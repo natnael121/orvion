@@ -59,7 +59,7 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, onViewChange, user
           <span className={`text-[10px] font-semibold tracking-wider uppercase ${currentView === 'mywork' ? 'opacity-100' : 'opacity-70'}`}>My Work</span>
         </button>
 
-        {(userData?.role === 'admin' || userData?.role === 'shop_owner') && (
+        {(userData?.role === 'admin' || userData?.role === 'shop_owner' || userData?.role === 'supervisor') && (
           <button
             onClick={() => onViewChange('admin')}
             className={`flex-1 py-4 flex flex-col items-center space-y-1 transition-all duration-300 ${currentView === 'admin'

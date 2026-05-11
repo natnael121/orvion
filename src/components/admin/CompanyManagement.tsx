@@ -12,12 +12,15 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
     const [newCompanyName, setNewCompanyName] = useState('')
     const [loading, setLoading] = useState(false)
     const [requests, setRequests] = useState<any[]>([])
+    const [requestRoles, setRequestRoles] = useState<Record<string, string>>({})
 
     // Add by username state
     const [addUsername, setAddUsername] = useState('')
     const [searchingUser, setSearchingUser] = useState(false)
     const [userSearchResults, setUserSearchResults] = useState<any[]>([])
     const [addingToCompanyId, setAddingToCompanyId] = useState<string | null>(null)
+    const [addRole, setAddRole] = useState('employee')
+    const [showNotFoundOption, setShowNotFoundOption] = useState(false)
 
     const fetchCompanies = async () => {
         if (!userData?.uid) return
@@ -103,16 +106,18 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
 
     const handleApprove = async (req: any) => {
         try {
+            const role = requestRoles[req.id] || 'employee'
             await addDoc(collection(db, 'shop_customers'), {
                 shopId: req.companyId,
                 customerId: req.userId,
                 telegramId: req.telegramId,
-                role: 'employee',
+                displayName: req.userName || 'Employee',
+                role,
                 createdAt: new Date(),
                 updatedAt: new Date()
             })
-            await updateDoc(doc(db, 'join_requests', req.id), { status: 'approved' })
-            showNotification('Approved user!', 'success')
+            await updateDoc(doc(db, 'join_requests', req.id), { status: 'approved', approvedRole: role })
+            showNotification(`Approved as ${role}!`, 'success')
             fetchCompanies()
         } catch (e) {
             showNotification('Failed to approve', 'error')
@@ -136,9 +141,10 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
 
         setSearchingUser(true)
         setUserSearchResults([])
+        setShowNotFoundOption(false)
         try {
             const usersSnap = await getDocs(collection(db, 'users'))
-            const searchTerm = addUsername.toLowerCase().trim()
+            const searchTerm = addUsername.toLowerCase().trim().replace('@', '')
             const matches = usersSnap.docs
                 .map(d => ({ uid: d.id, ...d.data() }))
                 .filter((u: any) => {
@@ -149,7 +155,7 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
                 })
             setUserSearchResults(matches)
             if (matches.length === 0) {
-                showNotification('No users found with that name', 'error')
+                setShowNotFoundOption(true)
             }
         } catch (e) {
             console.error(e)
@@ -159,10 +165,37 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
         }
     }
 
+    // Add by Telegram username even if not in system
+    const handleAddByTelegramUsername = async (companyId: string) => {
+        const username = addUsername.trim().replace('@', '')
+        if (!username) return
+        try {
+            await addDoc(collection(db, 'shop_customers'), {
+                shopId: companyId,
+                customerId: '',
+                telegramUsername: username,
+                displayName: `@${username}`,
+                role: addRole,
+                status: 'pending_link',
+                isLinked: false,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            })
+            showNotification(`Invitation created for @${username}! They will be linked when they open the app.`, 'success')
+            setAddUsername('')
+            setUserSearchResults([])
+            setAddingToCompanyId(null)
+            setShowNotFoundOption(false)
+            fetchCompanies()
+        } catch (e) {
+            console.error(e)
+            showNotification('Failed to add user', 'error')
+        }
+    }
+
     // Add user directly to company
     const handleAddUserToCompany = async (companyId: string, targetUser: any) => {
         try {
-            // Check if user is already in this company
             const existingQ = query(
                 collection(db, 'shop_customers'),
                 where('shopId', '==', companyId),
@@ -178,15 +211,17 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
                 shopId: companyId,
                 customerId: targetUser.uid,
                 telegramId: targetUser.telegramId || targetUser.telegram_id || 0,
-                role: 'employee',
+                displayName: targetUser.displayName || targetUser.first_name || 'Employee',
+                role: addRole,
                 createdAt: new Date(),
                 updatedAt: new Date()
             })
 
-            showNotification(`Added ${targetUser.displayName || targetUser.first_name || 'user'} to company!`, 'success')
+            showNotification(`Added ${targetUser.displayName || targetUser.first_name || 'user'} as ${addRole}!`, 'success')
             setAddUsername('')
             setUserSearchResults([])
             setAddingToCompanyId(null)
+            setShowNotFoundOption(false)
             fetchCompanies()
         } catch (e) {
             console.error(e)
@@ -231,19 +266,31 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
                     </div>
                     <div className="space-y-3">
                         {requests.map((req: any) => (
-                            <div key={req.id} className="bg-gray-50 dark:bg-gray-900 p-4 rounded-xl border border-gray-100 dark:border-gray-700 flex items-center justify-between">
-                                <div>
-                                    <h4 className="font-bold text-sm text-gray-800 dark:text-gray-200">
-                                        {req.userName || 'Unknown User'}
-                                    </h4>
-                                    <p className="text-xs text-gray-500 mt-0.5">
-                                        Wants to join <span className="font-semibold text-blue-600">{req.companyName || 'Company'}</span>
-                                    </p>
-                                    <p className="text-[10px] text-gray-400 mt-1">
-                                        {req.createdAt?.toDate ? req.createdAt.toDate().toLocaleDateString() : 'Recently'}
-                                    </p>
+                            <div key={req.id} className="bg-gray-50 dark:bg-gray-900 p-4 rounded-xl border border-gray-100 dark:border-gray-700">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div>
+                                        <h4 className="font-bold text-sm text-gray-800 dark:text-gray-200">
+                                            {req.userName || 'Unknown User'}
+                                        </h4>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                            Wants to join <span className="font-semibold text-blue-600">{req.companyName || 'Company'}</span>
+                                        </p>
+                                        <p className="text-[10px] text-gray-400 mt-1">
+                                            {req.createdAt?.toDate ? req.createdAt.toDate().toLocaleDateString() : 'Recently'}
+                                        </p>
+                                    </div>
                                 </div>
-                                <div className="flex space-x-2">
+                                <div className="flex items-center space-x-2">
+                                    <select
+                                        value={requestRoles[req.id] || 'employee'}
+                                        onChange={e => setRequestRoles(prev => ({ ...prev, [req.id]: e.target.value }))}
+                                        className="flex-1 px-2 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-bold focus:outline-none"
+                                    >
+                                        <option value="employee">Employee</option>
+                                        <option value="staff">Field Staff</option>
+                                        <option value="supervisor">Supervisor</option>
+                                        <option value="admin">Admin</option>
+                                    </select>
                                     <button
                                         onClick={() => handleApprove(req)}
                                         className="px-3 py-2 bg-green-600 text-white font-bold text-xs rounded-lg shadow-sm flex items-center hover:bg-green-700 transition-colors"
@@ -285,12 +332,27 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
 
                             {addingToCompanyId === comp.id ? (
                                 <div className="space-y-3">
+                                    {/* Role Selector */}
+                                    <div>
+                                        <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Assign Role</label>
+                                        <select
+                                            value={addRole}
+                                            onChange={e => setAddRole(e.target.value)}
+                                            className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-bold focus:outline-none focus:border-blue-500"
+                                        >
+                                            <option value="employee">Employee</option>
+                                            <option value="staff">Field Staff</option>
+                                            <option value="supervisor">Supervisor</option>
+                                            <option value="admin">Admin</option>
+                                        </select>
+                                    </div>
+
                                     <form onSubmit={handleSearchUser} className="flex space-x-2">
                                         <input
                                             type="text"
                                             value={addUsername}
                                             onChange={e => setAddUsername(e.target.value)}
-                                            placeholder="Search by name or username..."
+                                            placeholder="@telegram_username or name..."
                                             className="flex-1 px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:border-blue-500"
                                         />
                                         <button
@@ -302,7 +364,7 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => { setAddingToCompanyId(null); setUserSearchResults([]); setAddUsername(''); }}
+                                            onClick={() => { setAddingToCompanyId(null); setUserSearchResults([]); setAddUsername(''); setShowNotFoundOption(false); }}
                                             className="px-2 py-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg text-sm"
                                         >
                                             <XCircle size={16} />
@@ -332,13 +394,28 @@ export const CompanyManager: React.FC<{ userData: UserData | null }> = ({ userDa
                                             ))}
                                         </div>
                                     )}
+
+                                    {/* Not found — add by Telegram username directly */}
+                                    {showNotFoundOption && addUsername.trim() && (
+                                        <div className="bg-yellow-50 dark:bg-yellow-900/10 p-4 rounded-xl border border-yellow-200 dark:border-yellow-900/30 space-y-3">
+                                            <p className="text-xs text-yellow-800 dark:text-yellow-300 font-medium">
+                                                No registered user found. You can add by Telegram username — they'll be linked when they open the app.
+                                            </p>
+                                            <button
+                                                onClick={() => handleAddByTelegramUsername(comp.id)}
+                                                className="w-full py-2.5 bg-yellow-500 text-white rounded-lg text-sm font-bold flex items-center justify-center hover:bg-yellow-600 transition-colors"
+                                            >
+                                                <UserPlus size={14} className="mr-2" /> Add @{addUsername.trim().replace('@', '')} as {addRole}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 <button
                                     onClick={() => setAddingToCompanyId(comp.id)}
                                     className="w-full py-2.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg text-sm font-bold flex items-center justify-center hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
                                 >
-                                    <UserPlus size={16} className="mr-2" /> Add Employee by Name
+                                    <UserPlus size={16} className="mr-2" /> Add Employee by Username
                                 </button>
                             )}
                         </div>

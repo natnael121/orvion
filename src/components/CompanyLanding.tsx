@@ -1,8 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { collection, query, where, getDocs, addDoc, doc, updateDoc } from 'firebase/firestore'
 import { useFirebase } from '../contexts/FirebaseContext'
 import { useNotification } from '../contexts/NotificationContext'
-import { Building2, Search, PlusCircle, UserPlus, Clock } from 'lucide-react'
+import { Building2, Search, PlusCircle, UserPlus, Clock, Loader2 } from 'lucide-react'
 import { UserData, User } from '../types'
 
 interface CompanyLandingProps {
@@ -15,7 +15,8 @@ export const CompanyLanding: React.FC<CompanyLandingProps> = ({ user, userData, 
     const { db } = useFirebase()
     const { showNotification } = useNotification()
 
-    const [view, setView] = useState<'options' | 'join' | 'create'>('options')
+    const [view, setView] = useState<'options' | 'join' | 'create' | 'pending'>('options')
+    const [pendingCompanyName, setPendingCompanyName] = useState('')
 
     // Join state
     const [searchQuery, setSearchQuery] = useState('')
@@ -25,6 +26,44 @@ export const CompanyLanding: React.FC<CompanyLandingProps> = ({ user, userData, 
     // Create state
     const [companyName, setCompanyName] = useState('')
     const [creating, setCreating] = useState(false)
+
+    // Check for existing pending requests on mount
+    useEffect(() => {
+        const checkPendingRequests = async () => {
+            if (!userData?.uid) return
+            try {
+                const reqQ = query(
+                    collection(db, 'join_requests'),
+                    where('userId', '==', userData.uid),
+                    where('status', '==', 'pending')
+                )
+                const snap = await getDocs(reqQ)
+                if (!snap.empty) {
+                    const req = snap.docs[0].data()
+                    setPendingCompanyName(req.companyName || 'a company')
+                    setView('pending')
+                }
+
+                // Check if any request was approved — if so, enter the app
+                const approvedQ = query(
+                    collection(db, 'join_requests'),
+                    where('userId', '==', userData.uid),
+                    where('status', '==', 'approved')
+                )
+                const approvedSnap = await getDocs(approvedQ)
+                if (!approvedSnap.empty) {
+                    onCompanyDetermined()
+                }
+            } catch (e) {
+                console.error(e)
+            }
+        }
+        checkPendingRequests()
+
+        // Poll every 10 seconds to check if request was approved
+        const interval = setInterval(checkPendingRequests, 10000)
+        return () => clearInterval(interval)
+    }, [userData?.uid, db])
 
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -73,8 +112,8 @@ export const CompanyLanding: React.FC<CompanyLandingProps> = ({ user, userData, 
                 status: 'pending',
                 createdAt: new Date()
             })
-            showNotification('Join request sent! Pending admin approval.', 'success')
-            setView('options')
+            setPendingCompanyName(companyName)
+            setView('pending')
         } catch (e) {
             console.error(e)
             showNotification('Failed to send request', 'error')
@@ -225,6 +264,36 @@ export const CompanyLanding: React.FC<CompanyLandingProps> = ({ user, userData, 
                                 {creating ? 'Creating...' : 'Create Company'}
                             </button>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {view === 'pending' && (
+                <div className="w-full max-w-sm mx-auto">
+                    <div className="bg-white p-8 rounded-3xl shadow-lg border border-blue-100 text-center space-y-6">
+                        <div className="relative w-20 h-20 mx-auto">
+                            <div className="absolute inset-0 rounded-full border-4 border-blue-100"></div>
+                            <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin"></div>
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <Clock size={28} className="text-blue-500" />
+                            </div>
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-black text-gray-800">Request Pending</h3>
+                            <p className="text-sm text-gray-500 mt-2">
+                                Your request to join <span className="font-bold text-blue-600">{pendingCompanyName}</span> is waiting for admin approval.
+                            </p>
+                        </div>
+                        <div className="bg-blue-50 p-4 rounded-xl">
+                            <p className="text-xs text-blue-700 font-medium">
+                                ⏳ This page will automatically update once your request is approved. Please wait...
+                            </p>
+                        </div>
+                        <div className="flex items-center justify-center space-x-1">
+                            <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                            <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                            <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                        </div>
                     </div>
                 </div>
             )}
